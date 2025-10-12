@@ -1,4 +1,3 @@
-// src/services/courseApi.js
 import api from "./api";
 
 /** ===================== COURSES ===================== */
@@ -6,7 +5,7 @@ import api from "./api";
 // POST /courses (multipart) — Add New Course
 export const addCourse = async ({ coverFile, title, description }) => {
   const fd = new FormData();
-  if (coverFile) fd.append("cover", coverFile);
+  if (coverFile) fd.append("cover", coverFile); // Menambahkan file cover jika ada
   fd.append("title", title);
   fd.append("description", description);
   const res = await api.post("/courses", fd, {
@@ -37,7 +36,7 @@ export const updateCourse = async (id, { title, description }) => {
   return res.data;
 };
 
-// GET /courses — Get All Courses (opsional ?is_me=1)
+// GET /courses — Get All Courses (optional ?is_me=1)
 export const getCourses = async (params = {}) => {
   const res = await api.get("/courses", { params });
   // response: { success, message, data: { courses: [...] } }
@@ -63,8 +62,8 @@ export const deleteCourse = async (id) => {
 // POST /courses/:id/students — Add Student (join)
 export const joinCourse = async (id) => {
   const res = await api.post(
-    `/courses/${id}/students`,
-    new URLSearchParams(), // body kosong tapi x-www-form-urlencoded di docs sebagian endpoint
+    `/courses/${id}/students`, // URL untuk bergabung ke kursus
+    new URLSearchParams(), // Mengirim body kosong dengan header x-www-form-urlencoded
     { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
   // response: { success, message }
@@ -73,7 +72,7 @@ export const joinCourse = async (id) => {
 
 // DELETE /courses/:id/students — Delete Student (leave)
 export const leaveCourse = async (id) => {
-  const res = await api.delete(`/courses/${id}/students`);
+  const res = await api.delete(`/courses/${id}/students`); // Menggunakan courseId yang tepat
   // response: { success, message }
   return res.data;
 };
@@ -81,8 +80,8 @@ export const leaveCourse = async (id) => {
 // PUT /courses/:id/students/ratings — Change Student Ratings
 export const rateCourse = async (id, { ratings, comment }) => {
   const body = new URLSearchParams({
-    ratings: String(ratings),  // Pastikan ratings berupa angka
-    comment: comment ?? "",    // Jika tidak ada komentar, kirimkan string kosong
+    ratings: String(ratings), // Pastikan ratings berupa angka
+    comment: comment ?? "",   // Jika tidak ada komentar, kirimkan string kosong
   });
 
   try {
@@ -94,7 +93,7 @@ export const rateCourse = async (id, { ratings, comment }) => {
     if (res?.data?.success) {
       return {
         message: res.data.message,
-        averageRating: res.data.data?.averageRating,  // Pastikan server mengembalikan rata-rata rating
+        averageRating: res.data.data?.averageRating, // Pastikan server mengembalikan rata-rata rating
       };
     }
 
@@ -104,6 +103,7 @@ export const rateCourse = async (id, { ratings, comment }) => {
     throw error;
   }
 };
+
 /** ===================== CONTENTS ===================== */
 
 // POST /courses/:courseId/contents — Add New Content
@@ -141,8 +141,8 @@ export const deleteContent = async (contentId) => {
 };
 
 // POST /courses/-/contents/:id/learns — Change Content Status
-export const setContentStatus = async (contentId, status /* 1 | 0 */) => {
-  const body = new URLSearchParams({ status: String(status) });
+export const setContentStatus = async (contentId, status) => {
+  const body = new URLSearchParams({ status: String(status) }); // Kirim status sebagai string
   const res = await api.post(`/courses/-/contents/${contentId}/learns`, body, {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });

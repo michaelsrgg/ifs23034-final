@@ -1,28 +1,15 @@
+// src/pages/CourseDetail.jsx
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "../services/api";
-import { joinCourse, leaveCourse, rateCourse, deleteCourse } from "../services/courseApi";
-
-// Fungsi untuk menampilkan bintang berdasarkan rating
-const renderStarRating = (rating) => {
-  const stars = [];
-  for (let i = 1; i <= 5; i++) {
-    stars.push(
-      <svg
-        key={i}
-        className={`w-5 h-5 ${i <= rating ? "text-yellow-500" : "text-gray-300"}`}
-        fill="currentColor"
-        viewBox="0 0 20 20"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="M10 15l-5.17 2.73 1.32-6.18L0 6.24l6.26-.54L10 0l3.74 5.7L20 6.24l-5.15 5.31 1.32 6.18z"
-        />
-      </svg>
-    );
-  }
-  return stars;
-};
+import {
+  joinCourse,
+  leaveCourse,
+  rateCourse,
+  deleteCourse,
+  setContentStatus,
+  deleteContent,
+} from "../services/courseApi";
 
 export default function CourseDetail() {
   const { id } = useParams();
@@ -39,6 +26,17 @@ export default function CourseDetail() {
   // joined status (dikontrol sendiri + disinkronkan saat refetch)
   const [joined, setJoined] = useState(false);
 
+  // bantu deteksi berbagai kemungkinan nama field dari API
+  const deriveJoined = (c) =>
+    Boolean(
+      c?.my_status_student ??
+        c?.my_status_join ??
+        c?.is_joined ??
+        c?.joined ??
+        c?.me_is_student ??
+        c?.student_of
+    );
+
   const fetchCourse = async () => {
     setLoading(true);
     setErrMsg("");
@@ -46,8 +44,12 @@ export default function CourseDetail() {
       const res = await api.get(`/courses/${id}`);
       const c = res?.data?.data?.course ?? res?.data?.data ?? null;
       setCourse(c);
-      setJoined(c?.my_status_student || false);  // Mengatur status bergabung
+      setJoined(deriveJoined(c));
     } catch (err) {
+      if (err?.response?.status === 401) {
+        navigate("/login", { replace: true });
+        return;
+      }
       setErrMsg("Gagal memuat data course.");
       setCourse(null);
     } finally {
@@ -57,23 +59,26 @@ export default function CourseDetail() {
 
   useEffect(() => {
     fetchCourse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (loading) return <p className="muted p-6">Memuat data course…</p>;
-  if (errMsg) return <p className="p-6 text-red-600 dark:text-red-400">{errMsg}</p>;
+  if (errMsg)
+    return <p className="p-6 text-red-600 dark:text-red-400">{errMsg}</p>;
   if (!course) return <p className="muted p-6">Course tidak ditemukan.</p>;
 
+  // actions
   const doJoin = async () => {
     try {
-      // Memanggil API untuk bergabung
       const out = await joinCourse(id);
-      if (out?.success) {
-        setJoined(true);  // Update status bergabung
-        setCourse((prev) => ({ ...prev, my_status_student: true }));
-        alert(out?.message ?? "Berhasil bergabung.");
-        await fetchCourse();  // Refresh data kursus
-      }
+      // optimistic UI
+      setJoined(true);
+      setCourse((prev) => (prev ? { ...prev, my_status_student: true } : prev));
+      alert(out?.message ?? "Berhasil bergabung.");
+      // sinkron ulang dari server (kalau ada counter yang berubah)
+      await fetchCourse();
     } catch (e) {
+      setJoined(false);
       alert(e?.response?.data?.message ?? "Gagal bergabung.");
     }
   };
@@ -81,13 +86,14 @@ export default function CourseDetail() {
   const doLeave = async () => {
     if (!confirm("Keluar dari kursus ini?")) return;
     try {
-      const out = await leaveCourse(id);  // Keluar dari kursus
-      if (out?.success) {
-        setJoined(false);  // Update status keluar
-        setCourse((prev) => ({ ...prev, my_status_student: false }));
-        alert(out?.message ?? "Berhasil keluar.");
-        await fetchCourse();  // Refresh data kursus
-      }
+      const out = await leaveCourse(id);
+      // optimistic UI
+      setJoined(false);
+      setCourse((prev) =>
+        prev ? { ...prev, my_status_student: false } : prev
+      );
+      alert(out?.message ?? "Berhasil keluar.");
+      await fetchCourse();
     } catch (e) {
       alert(e?.response?.data?.message ?? "Gagal keluar.");
     }
@@ -95,18 +101,50 @@ export default function CourseDetail() {
 
   const doRate = async (e) => {
     e.preventDefault();
-    if (!joined) {
-      alert("Anda harus bergabung dengan kursus ini terlebih dahulu.");
-      return;
-    }
     try {
       const out = await rateCourse(id, { ratings, comment });
       alert(out?.message ?? "Rating terkirim.");
-      setCourse((prev) => ({ ...prev, avg_rating: out?.averageRating }));
-      setRatings(out?.averageRating); // Set rating setelah dikirim
-      setComment(""); // reset comment
+      await fetchCourse();
     } catch (e) {
-      alert(e?.response?.data?.message ?? "Gagal mengirim rating.");
+      const msg =
+        e?.response?.data?.message ??
+        (e?.response?.status === 403
+          ? "Tidak boleh memberi rating: pastikan kamu sudah bergabung di course ini."
+          : "Gagal mengirim rating.");
+      alert(msg);
+    }
+  };
+
+  const doDeleteCourse = async () => {
+    if (!confirm("Hapus course ini? Tindakan tidak dapat dibatalkan.")) return;
+    try {
+      const out = await deleteCourse(id);
+      alert(out?.message ?? "Course dihapus.");
+      navigate("/courses", { replace: true });
+    } catch (e) {
+      alert(e?.response?.data?.message ?? "Gagal menghapus course.");
+    }
+  };
+
+  const toggleContentStatus = async (content) => {
+    try {
+      const next = content?.my_status_finished ? 0 : 1;
+      const out = await setContentStatus(content.id, next);
+      alert(out?.message ?? "Status diperbarui.");
+      await fetchCourse();
+    } catch (e) {
+      alert(e?.response?.data?.message ?? "Gagal mengubah status.");
+    }
+  };
+
+  const doDeleteContent = async (contentId) => {
+    if (!confirm("Hapus konten ini?")) return;
+    try {
+      const out = await deleteContent(contentId);
+      alert(out?.message ?? "Konten dihapus.");
+      await fetchCourse();
+    } catch (e) {
+      alert(e?.response?.data?.message ?? "Gagal menghapus konten.");
     }
   };
 
@@ -125,7 +163,7 @@ export default function CourseDetail() {
           <Link to={`/courses/${id}/edit`} className="btn-ghost">
             Edit
           </Link>
-          <button onClick={() => deleteCourse(id)} className="btn-ghost">
+          <button onClick={doDeleteCourse} className="btn-ghost">
             Hapus
           </button>
           {joined ? (
@@ -149,16 +187,11 @@ export default function CourseDetail() {
 
       {/* Rating */}
       <div className="card p-5 space-y-3">
-        <h2 className="font-semibold">Rating</h2>
-        <div className="flex items-center gap-2">
-          {renderStarRating(course.avg_rating || 0)}
-          <span className="text-sm text-gray-500 dark:text-gray-400">
-            {course.avg_rating || 0} / 5
-          </span>
-        </div>
+        <h2 className="font-semibold">Beri Rating</h2>
         {!joined ? (
           <div className="rounded-lg p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-sm">
-            Kamu harus <b>bergabung</b> ke course ini sebelum bisa memberi rating.
+            Kamu harus <b>bergabung</b> ke course ini sebelum bisa memberi
+            rating.
             <button onClick={doJoin} className="btn-ghost ml-2">
               Gabung sekarang
             </button>
