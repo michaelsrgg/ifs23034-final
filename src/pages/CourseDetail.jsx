@@ -11,6 +11,8 @@ import {
   deleteContent,
 } from "../services/courseApi";
 
+const BASE = "/dashboard";
+
 export default function CourseDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -23,10 +25,10 @@ export default function CourseDetail() {
   const [ratings, setRatings] = useState(5);
   const [comment, setComment] = useState("");
 
-  // joined status (dikontrol sendiri + disinkronkan saat refetch)
+  // status join yang kita “pegang” sendiri, supaya tidak turun lagi saat refetch
   const [joined, setJoined] = useState(false);
 
-  // bantu deteksi berbagai kemungkinan nama field dari API
+  // berbagai kemungkinan nama field dari API untuk status join
   const deriveJoined = (c) =>
     Boolean(
       c?.my_status_student ??
@@ -44,7 +46,10 @@ export default function CourseDetail() {
       const res = await api.get(`/courses/${id}`);
       const c = res?.data?.data?.course ?? res?.data?.data ?? null;
       setCourse(c);
-      setJoined(deriveJoined(c));
+      setJoined((prev) => {
+        const dj = deriveJoined(c);
+        return dj ? true : prev;
+      });
     } catch (err) {
       if (err?.response?.status === 401) {
         navigate("/login", { replace: true });
@@ -59,23 +64,21 @@ export default function CourseDetail() {
 
   useEffect(() => {
     fetchCourse();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <p className="muted p-6">Memuat data course…</p>;
-  if (errMsg)
-    return <p className="p-6 text-red-600 dark:text-red-400">{errMsg}</p>;
+  if (errMsg) return <p className="p-6 text-red-600 dark:text-red-400">{errMsg}</p>;
   if (!course) return <p className="muted p-6">Course tidak ditemukan.</p>;
+
+  const isJoined = joined || deriveJoined(course);
 
   // actions
   const doJoin = async () => {
     try {
       const out = await joinCourse(id);
-      // optimistic UI
       setJoined(true);
       setCourse((prev) => (prev ? { ...prev, my_status_student: true } : prev));
       alert(out?.message ?? "Berhasil bergabung.");
-      // sinkron ulang dari server (kalau ada counter yang berubah)
       await fetchCourse();
     } catch (e) {
       setJoined(false);
@@ -87,11 +90,8 @@ export default function CourseDetail() {
     if (!confirm("Keluar dari kursus ini?")) return;
     try {
       const out = await leaveCourse(id);
-      // optimistic UI
       setJoined(false);
-      setCourse((prev) =>
-        prev ? { ...prev, my_status_student: false } : prev
-      );
+      setCourse((prev) => (prev ? { ...prev, my_status_student: false } : prev));
       alert(out?.message ?? "Berhasil keluar.");
       await fetchCourse();
     } catch (e) {
@@ -104,6 +104,7 @@ export default function CourseDetail() {
     try {
       const out = await rateCourse(id, { ratings, comment });
       alert(out?.message ?? "Rating terkirim.");
+      setComment("");
       await fetchCourse();
     } catch (e) {
       const msg =
@@ -120,7 +121,8 @@ export default function CourseDetail() {
     try {
       const out = await deleteCourse(id);
       alert(out?.message ?? "Course dihapus.");
-      navigate("/courses", { replace: true });
+      // Navigate kembali ke halaman yang sama setelah edit atau hapus course
+      navigate(`/courses/${id}`, { replace: true });
     } catch (e) {
       alert(e?.response?.data?.message ?? "Gagal menghapus course.");
     }
@@ -150,6 +152,18 @@ export default function CourseDetail() {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumbs */}
+      <div className="text-sm">
+        <Link
+          to="/courses"
+          className="text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          Courses
+        </Link>
+        <span className="mx-1">/</span>
+        <span className="text-slate-500 dark:text-slate-400">{course.title}</span>
+      </div>
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -157,21 +171,55 @@ export default function CourseDetail() {
             {course.title}
           </h1>
           <p className="muted">Author: {course?.author?.name ?? "-"}</p>
+
+          {/* Progress & Rating Summary */}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+            {typeof course.my_percentage_finished === "number" ? (
+              <div className="flex items-center gap-2">
+                <span className="muted">Progress:</span>
+                <div className="w-40 h-2 bg-slate-200 dark:bg-slate-700 rounded overflow-hidden">
+                  <div
+                    className="h-2 bg-blue-600 transition-[width] duration-300"
+                    style={{
+                      width: `${Math.max(
+                        0,
+                        Math.min(100, course.my_percentage_finished)
+                      )}%`,
+                    }}
+                    aria-label="progress"
+                    role="progressbar"
+                    aria-valuenow={Math.round(course.my_percentage_finished)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  />
+                </div>
+                <span className="muted">
+                  {Math.round(course.my_percentage_finished)}%
+                </span>
+              </div>
+            ) : null}
+
+            {typeof course.avg_ratings !== "undefined" ? (
+              <div className="muted">
+                Rata-rata rating: <b>{Number(course.avg_ratings).toFixed(1)}</b> / 5
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex gap-2">
           <Link to={`/courses/${id}/edit`} className="btn-ghost">
             Edit
           </Link>
-          <button onClick={doDeleteCourse} className="btn-ghost">
+          <button type="button" onClick={doDeleteCourse} className="btn-ghost">
             Hapus
           </button>
-          {joined ? (
-            <button onClick={doLeave} className="btn">
+          {isJoined ? (
+            <button type="button" onClick={doLeave} className="btn">
               Keluar
             </button>
           ) : (
-            <button onClick={doJoin} className="btn">
+            <button type="button" onClick={doJoin} className="btn">
               Gabung
             </button>
           )}
@@ -185,14 +233,45 @@ export default function CourseDetail() {
         </p>
       </div>
 
-      {/* Rating */}
+      {/* Ulasan */}
+      {Array.isArray(course?.ratings) && course.ratings.length > 0 ? (
+        <div className="card p-5 space-y-3">
+          <h2 className="font-semibold">Ulasan Peserta</h2>
+          <div className="muted text-sm">
+            Rata-rata: <b>{Number(course?.avg_ratings ?? 0).toFixed(1)}</b> dari{" "}
+            {course.ratings.length} ulasan
+          </div>
+          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+            {course.ratings.slice(0, 10).map((r, idx) => (
+              <li key={idx} className="py-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-medium text-slate-800 dark:text-slate-200">
+                      {r?.name ?? r?.user?.name ?? "Pengguna"}
+                    </div>
+                    {r?.comment ? (
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                        {r.comment}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-sm font-semibold">
+                    ⭐ {r?.ratings ?? r?.rating ?? "-"}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {/* Form beri rating */}
       <div className="card p-5 space-y-3">
         <h2 className="font-semibold">Beri Rating</h2>
-        {!joined ? (
+        {!isJoined ? (
           <div className="rounded-lg p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-sm">
-            Kamu harus <b>bergabung</b> ke course ini sebelum bisa memberi
-            rating.
-            <button onClick={doJoin} className="btn-ghost ml-2">
+            Kamu harus <b>bergabung</b> ke course ini sebelum bisa memberi rating.
+            <button type="button" onClick={doJoin} className="btn-ghost ml-2">
               Gabung sekarang
             </button>
           </div>
@@ -223,38 +302,44 @@ export default function CourseDetail() {
 
       {/* Konten */}
       <div className="card p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold">Contents</h2>
-          <Link to={`/courses/${id}/contents/new`} className="btn">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Daftar Konten</h2>
+          <Link to={`${BASE}/courses/${id}/contents/new`} className="btn">
             Tambah Konten
           </Link>
         </div>
 
-        {Array.isArray(course.contents) && course.contents.length > 0 ? (
-          <ul className="space-y-2">
+        {Array.isArray(course?.contents) && course.contents.length > 0 ? (
+          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
             {course.contents.map((ct) => (
-              <li
-                key={ct.id}
-                className="flex items-center justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60"
-              >
+              <li key={ct.id} className="py-3 flex items-start justify-between">
                 <div>
-                  <div className="font-medium">{ct.title}</div>
-                  <div className="muted text-xs">{ct.youtube}</div>
+                  <div className="font-medium text-slate-800 dark:text-slate-200">
+                    {ct.title}
+                  </div>
+                  {ct.youtube ? (
+                    <div className="muted text-xs">{ct.youtube}</div>
+                  ) : null}
+                  <div className="mt-1 text-xs">
+                    Status: <b>{ct.my_status_finished ? "Selesai" : "Belum"}</b>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => toggleContentStatus(ct)}
                     className="btn-ghost"
                   >
                     {ct.my_status_finished ? "Tandai Belum" : "Tandai Selesai"}
                   </button>
                   <Link
-                    to={`/courses/${id}/contents/${ct.id}/edit`}
+                    to={`${BASE}/courses/${id}/contents/${ct.id}/edit`}
                     className="btn-ghost"
                   >
                     Edit
                   </Link>
                   <button
+                    type="button"
                     onClick={() => doDeleteContent(ct.id)}
                     className="btn-ghost"
                   >
